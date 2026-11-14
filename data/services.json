@@ -14,6 +14,27 @@
     ],
     "description": "Guidance for Bhutanese citizens applying for an ordinary passport.",
     "eligibility": "Bhutanese citizens are eligible to apply for a passport.",
+    "documents_required": [
+      "Valid Security Clearance Certificate.",
+      "Copy of Citizenship/Resident ID card.",
+      "Recent passport-size photograph meeting the official photograph requirements.",
+      "Police report if the passport is lost or stolen."
+    ],
+    "photo_requirements": [
+      "Photograph must not be older than six months.",
+      "Size: 45 mm x 35 mm.",
+      "White background without border.",
+      "Facial image should occupy 70 to 80 percent of the photograph.",
+      "Eyes must be open and clearly visible.",
+      "Photograph must be clear and without shadows."
+    ],
+    "child_requirements": [
+      "For applicants below 18, provide a copy of the parents' or legal guardian's Citizenship Identity Card or identity documents.",
+      "Children aged 10 and above may sign or write their name on the application form.",
+      "For children below 10, a parent or legal guardian may sign on their behalf.",
+      "If one parent has sole custody, legal documents proving custody must be provided."
+    ],
+
     "procedure": [
       "Visit the official Bhutan G2C Citizen Services Portal.",
       "Find the passport application service.",

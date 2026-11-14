@@ -9,6 +9,13 @@ from tools.service_tools import (
 )
 
 
+from memory.database import (
+    init_db,
+    save_interaction,
+    get_recent_interactions,
+    save_feedback
+)
+
 # ==========================================
 # 1. DEFINE AGENT STATE
 # ==========================================
@@ -16,12 +23,24 @@ from tools.service_tools import (
 class AgentState(TypedDict, total=False):
 
     query: str
+    original_query: str
+
+    session_id: str
+
+    recent_history: list
+
     search_results: list
+
     selected_service_id: Optional[int]
+
     service_details: dict
+
     response: str
+
     next_action: str
+
     tools_used: list
+
     agent_steps: list
 
 
@@ -29,25 +48,70 @@ class AgentState(TypedDict, total=False):
 # 2. UNDERSTAND CITIZEN REQUEST
 # ==========================================
 
+
+
 def understand_request(state: AgentState):
-
-    query = state.get("query", "").strip()
-
     print("\n[AGENT] Understanding citizen request...")
 
-    if not query:
+    current_query = state.get("original_query", state.get("query", "")).strip()
+    history = state.get("recent_history", [])
 
+    if not current_query:
         return {
-            "response": "Please enter a question about a Bhutan government service.",
+            "response": "Please enter a government service question.",
             "next_action": "stop"
         }
 
-    print(f"[AGENT] Citizen request: {query}")
+    combined_query = current_query
+
+    follow_up_phrases = [
+        "what about",
+        "tell me more",
+        "where can i",
+        "what documents",
+        "which documents",
+        "how much",
+        "what is the procedure",
+        "can you explain",
+        "how long",
+        "where do i"
+    ]
+
+    is_follow_up = any(
+        phrase in current_query.lower()
+        for phrase in follow_up_phrases
+    )
+
+    if is_follow_up and history:
+        # Find the most recent previous citizen request
+        previous_query = ""
+        for interaction in history:
+            old_query = interaction.get("query", "").strip().lower()
+            if any(
+                word in old_query
+                for word in ["passport", "birth", "death", "driving licence"]
+                ):
+                previous_query = interaction.get("query", "").strip()
+                break
+
+        if previous_query:
+            combined_query = previous_query + " " + current_query
+
+            print("[MEMORY] Previous conversation found.")
+            print("[MEMORY] Previous request:", previous_query)
+            print("[MEMORY] Follow-up request:", current_query)
+
+    print("[AGENT] Processing:", combined_query)
 
     return {
-        "query": query,
-        "agent_steps": ["Understood citizen request"]
+        "query": combined_query,
+        "original_query": current_query,
+        "agent_steps": state.get("agent_steps", []) +
+                       ["Understood citizen request",
+                        "Checked recent conversation memory"]
     }
+
+
 
 
 # ==========================================
@@ -172,67 +236,97 @@ def retrieve_service(state: AgentState):
 # 7. GENERATE CITIZEN GUIDANCE
 # ==========================================
 
-def generate_guidance(state: AgentState):
 
+def generate_guidance(state: AgentState):
     print("\n[AGENT] Generating citizen guidance...")
 
     service = state.get("service_details", {})
-
-    if not service:
-
-        return {
-            "next_action": "fallback"
-        }
+    original_query = state.get("original_query", "").lower()
 
     response = f"""
 BHUTAN CITIZEN SERVICE GUIDANCE
 ================================
 
-Service: {service['name']}
+Service: {service.get('name', 'Unknown')}
+Category: {service.get('category', 'Unknown')}
 
-Category: {service['category']}
+"""
 
+    if "document" in original_query:
+        documents = service.get("documents_required", [])
+
+        response += "DOCUMENTS REQUIRED:\n"
+
+        if documents:
+            for index, document in enumerate(documents, 1):
+                response += f"{index}. {document}\n"
+        else:
+            response += (
+                "The document checklist is not available "
+                "in the knowledge base. Please consult the "
+                "official government source.\n"
+            )
+
+        response += "\n"
+
+    elif "photo" in original_query or "photograph" in original_query:
+        photo_requirements = service.get("photo_requirements", [])
+
+        response += "PHOTOGRAPH REQUIREMENTS:\n"
+
+        if photo_requirements:
+            for index, requirement in enumerate(photo_requirements, 1):
+                response += f"{index}. {requirement}\n"
+        else:
+            response += "Please consult the official source for photograph requirements.\n"
+
+        response += "\n"
+
+    else:
+        response += f"""
 Description:
-{service['description']}
+{service.get('description', 'Not available')}
 
 Eligibility:
-{service['eligibility']}
+{service.get('eligibility', 'Please check the official source.')}
 
 Application Procedure:
 """
 
-    for number, step in enumerate(
-        service["procedure"], start=1
-    ):
+        for index, step in enumerate(service.get("procedure", []), 1):
+            response += f"{index}. {step}\n"
 
-        response += f"\n{number}. {step}"
+        response += "\n"
+
+    if "child" in original_query or "minor" in original_query:
+        child_requirements = service.get("child_requirements", [])
+
+        if child_requirements:
+            response += "ADDITIONAL REQUIREMENTS FOR CHILDREN:\n"
+            for index, requirement in enumerate(child_requirements, 1):
+                response += f"{index}. {requirement}\n"
+            response += "\n"
 
     response += f"""
-
-Important Information:
-{service['important_note']}
-
 Official Website:
-{service['official_website']}
+{service.get('official_website', 'Not available')}
 
 Information Source:
-{service['source']}
+{service.get('source', 'Not available')}
 
 Source URL:
-{service['source_url']}
+{service.get('source_url', 'Not available')}
 
-Last checked in project dataset:
-{service['last_checked']}
-
-Please verify current requirements with the relevant
-government authority before submitting an application.
+Please verify the latest requirements with the
+relevant government authority before applying.
 """
+
+    print("[AGENT] Guidance generated successfully.")
 
     return {
         "response": response,
-        "agent_steps": state.get("agent_steps", []) + [
-            "Generated citizen service guidance"
-        ]
+        "agent_steps": state.get("agent_steps", []) +
+                       ["Generated citizen service guidance"]
     }
 
 
@@ -371,31 +465,66 @@ def build_agent():
 # 10. RUN THE AGENT
 # ==========================================
 
-def run_agent(query: str):
+
+def run_agent(query: str, session_id="cli-session"):
+
+    # Initialize database
+    init_db()
+
+    # Retrieve recent conversations
+    recent_history = get_recent_interactions(
+        session_id=session_id,
+        limit=5
+    )
+
+    print("\n[MEMORY] Retrieved previous interactions:",
+          len(recent_history))
 
     agent = build_agent()
 
     initial_state = {
         "query": query,
+        "original_query": query,
+        "session_id": session_id,
+        "recent_history": recent_history,
         "search_results": [],
         "tools_used": [],
         "agent_steps": []
     }
 
+    # Execute agent workflow
     result = agent.invoke(initial_state)
 
+    # Store completed interaction
+    response = result.get("response", "")
+
+    interaction_id = save_interaction(
+        session_id=session_id,
+        query=query,
+        response=response,
+        tools_used=result.get("tools_used", [])
+    )
+
+    result["interaction_id"] = interaction_id
+
+    print("\n[MEMORY] Interaction saved:", interaction_id)
+
     return result
+
 
 
 # ==========================================
 # 11. TEST THE AGENT
 # ==========================================
 
+
 if __name__ == "__main__":
 
     print("=" * 50)
     print("BHUTAN CITIZEN SERVICE GUIDANCE AGENT")
     print("=" * 50)
+
+    init_db()
 
     user_query = input(
         "\nEnter your government service question: "
@@ -407,11 +536,39 @@ if __name__ == "__main__":
     print("FINAL AGENT RESPONSE")
     print("=" * 50)
 
-    print(result.get("response", "No response generated."))
+    print(result.get("response", ""))
 
     print("\nTOOLS USED:")
     print(result.get("tools_used", []))
 
     print("\nAGENT DECISION STEPS:")
+
     for step in result.get("agent_steps", []):
         print("-", step)
+
+    # Collect citizen feedback
+    print("\n" + "=" * 50)
+    print("CITIZEN FEEDBACK")
+    print("=" * 50)
+
+    print("Rate the response from 1 to 5.")
+
+    try:
+
+        rating = int(input("Your rating: "))
+
+        comment = input(
+            "Additional feedback (optional): "
+        )
+
+        save_feedback(
+            interaction_id=result["interaction_id"],
+            rating=rating,
+            comment=comment
+        )
+
+        print("\nThank you for your feedback!")
+
+    except ValueError:
+
+        print("\nInvalid rating. Please enter a number from 1 to 5.")
