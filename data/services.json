@@ -1,0 +1,56 @@
+
+[
+  {
+    "id": 1,
+    "name": "Passport Application",
+    "category": "Tourism, Passport and Visa",
+    "keywords": [
+      "passport",
+      "travel document",
+      "new passport",
+      "passport replacement",
+      "passport renewal",
+      "lost passport"
+    ],
+    "description": "Guidance for Bhutanese citizens applying for an ordinary passport.",
+    "eligibility": "Bhutanese citizens are eligible to apply for a passport.",
+    "procedure": [
+      "Visit the official Bhutan G2C Citizen Services Portal.",
+      "Find the passport application service.",
+      "Follow the official online application instructions.",
+      "Check the Ministry of Foreign Affairs guidance for the applicable requirements and fees."
+    ],
+    "important_note": "Requirements and fees may change. Confirm the latest information with the Ministry of Foreign Affairs before applying.",
+    "official_website": "https://www.citizenservices.gov.bt/",
+    "source": "Ministry of Foreign Affairs and External Trade",
+    "source_url": "https://www.mfa.gov.bt/passport-application/",
+    "last_checked": "2026-11-15"
+  },
+  {
+    "id": 2,
+    "name": "Birth and Death Registration",
+    "category": "Family",
+    "keywords": [
+      "birth certificate",
+      "birth registration",
+      "register a baby",
+      "newborn registration",
+      "death registration",
+      "death certificate"
+    ],
+    "description": "Guidance for accessing birth and death registration services in Bhutan.",
+    "eligibility": "Refer to the official Department of Civil Registration and Census guidance for applicable eligibility.",
+    "procedure": [
+      "Visit the Bhutan G2C Citizen Services Portal.",
+      "Locate the relevant birth or death registration service.",
+      "Follow the official instructions for accessing the service.",
+      "The Department of Civil Registration and Census announced nationwide availability through the Integrated Citizen Services platform using Bhutan NDI.",
+      "Consult the official department for current document requirements and further instructions."
+    ],
+    "important_note": "Confirm current requirements and eligibility with the Department of Civil Registration and Census.",
+    "official_website": "https://www.citizenservices.gov.bt/",
+    "source": "Department of Civil Registration and Census",
+    "source_url": "https://dcrc.moha.gov.bt/index.php/2024/02/26/birth-and-death-registration-services-through-integrated-citizen-services-ics-system/",
+    "last_checked": "2026-11-15"
+  }
+]
