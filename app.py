@@ -2,6 +2,8 @@
 import streamlit as st
 import uuid
 
+st.write("DEPLOYMENT TEST: Latest app.py is running.")
+
 from agent.workflow import run_agent
 from memory.database import init_db, save_feedback
 
