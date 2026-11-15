@@ -141,6 +141,10 @@ if user_query:
                     "Sorry, I could not generate a response."
                 )
 
+                st.write("DEBUG - Result keys:", list(result.keys()))
+                st.write("DEBUG - Response:", repr(response))
+                st.write("DEBUG - Agent steps:", result.get("agent_steps", []))
+
                 interaction_id = result.get("interaction_id")
 
                 st.markdown(response)
