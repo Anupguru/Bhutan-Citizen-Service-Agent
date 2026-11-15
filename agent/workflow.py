@@ -1,4 +1,7 @@
 
+import json
+
+from utils.llm_client import generate_llm_response
 from typing import TypedDict, Optional, Any
 
 from langgraph.graph import StateGraph, START, END
@@ -8,12 +11,19 @@ from tools.service_tools import (
     get_service_details
 )
 
+from safety.guardrails import (
+    validate_input,
+    check_retrieval_confidence,
+    safe_fallback_response,
+    validate_output
+)
 
 from memory.database import (
     init_db,
     save_interaction,
     get_recent_interactions,
-    save_feedback
+    save_feedback,
+    get_adaptation_guidance
 )
 
 # ==========================================
@@ -41,7 +51,13 @@ class AgentState(TypedDict, total=False):
 
     tools_used: list
 
+    llm_reasoning: str
+    
+    llm_available: bool
+
     agent_steps: list
+
+    input_error: str
 
 
 # ==========================================
@@ -50,18 +66,36 @@ class AgentState(TypedDict, total=False):
 
 
 
+
 def understand_request(state: AgentState):
+
     print("\n[AGENT] Understanding citizen request...")
 
-    current_query = state.get("original_query", state.get("query", "")).strip()
+    current_query = state.get(
+        "original_query",
+        state.get("query", "")
+    )
+
     history = state.get("recent_history", [])
 
-    if not current_query:
+    # Validate citizen input
+    is_valid, error_message = validate_input(current_query)
+
+    if not is_valid:
+
+        print("[SAFETY] Invalid citizen input.")
+
         return {
-            "response": "Please enter a government service question.",
-            "next_action": "stop"
+            "query": "",
+            "original_query": current_query,
+            "input_error": error_message,
+            "agent_steps": state.get("agent_steps", []) + [
+                "Rejected invalid citizen input"
+            ]
         }
 
+    # Preserve the original question
+    current_query = current_query.strip()
     combined_query = current_query
 
     follow_up_phrases = [
@@ -83,19 +117,36 @@ def understand_request(state: AgentState):
     )
 
     if is_follow_up and history:
-        # Find the most recent previous citizen request
+
         previous_query = ""
+
         for interaction in history:
-            old_query = interaction.get("query", "").strip().lower()
+
+            old_query = interaction.get(
+                "query", ""
+            ).strip().lower()
+
             if any(
                 word in old_query
-                for word in ["passport", "birth", "death", "driving licence"]
-                ):
-                previous_query = interaction.get("query", "").strip()
+                for word in [
+                    "passport",
+                    "birth",
+                    "death",
+                    "driving licence"
+                ]
+            ):
+
+                previous_query = interaction.get(
+                    "query", ""
+                ).strip()
+
                 break
 
         if previous_query:
-            combined_query = previous_query + " " + current_query
+
+            combined_query = (
+                previous_query + " " + current_query
+            )
 
             print("[MEMORY] Previous conversation found.")
             print("[MEMORY] Previous request:", previous_query)
@@ -106,11 +157,90 @@ def understand_request(state: AgentState):
     return {
         "query": combined_query,
         "original_query": current_query,
-        "agent_steps": state.get("agent_steps", []) +
-                       ["Understood citizen request",
-                        "Checked recent conversation memory"]
+        "input_error": "",
+        "agent_steps": state.get("agent_steps", []) + [
+            "Understood citizen request",
+            "Checked recent conversation memory",
+            "Validated citizen input"
+        ]
     }
 
+
+
+def llm_reasoning_node(state: AgentState):
+    print("\n[LLM] Interpreting citizen request...")
+
+    current_query = state.get("query", "")
+    original_query = state.get("original_query", current_query)
+
+    history = state.get("recent_history", [])
+
+    system_prompt = """
+You are an intent-understanding component for a
+Bhutan Citizen Service Guidance Agent.
+
+Your task is to interpret a citizen's question and
+produce a concise search query for a government
+service knowledge base.
+
+Rules:
+1. Use previous conversation context when relevant.
+2. Identify the government service being discussed.
+3. Preserve the actual intent of the latest question.
+4. Do not invent government service information.
+5. Return only the search keywords or phrase.
+6. Never return commands such as /search.
+7. Do not answer the citizen's question.
+8. If the service is not clear, preserve the original
+   question rather than guessing.
+"""
+
+    user_prompt = f"""
+Previous conversation:
+{json.dumps(history[:3], ensure_ascii=False)}
+
+Current citizen question:
+{original_query}
+
+Context-enriched question:
+{current_query}
+
+Produce the best concise search query.
+"""
+
+    try:
+        reasoning = generate_llm_response(
+            system_prompt,
+            user_prompt
+        )
+
+        reasoning = reasoning.strip()
+        if reasoning.lower().startswith("/search"):
+            reasoning = reasoning[7:].strip()
+            if not reasoning:
+                raise ValueError("Empty LLM reasoning result.")
+
+        print("[LLM] Interpreted search query:", reasoning)
+
+        return {
+            "query": reasoning,
+            "llm_reasoning": reasoning,
+            "llm_available": True,
+            "agent_steps": state.get("agent_steps", []) +
+                           ["Used LLM to interpret citizen intent"]
+        }
+
+    except Exception as error:
+        print("[LLM ERROR]", error)
+        print("[LLM] Falling back to the original search query.")
+
+        return {
+            "query": current_query,
+            "llm_reasoning": "LLM unavailable; used original query.",
+            "llm_available": False,
+            "agent_steps": state.get("agent_steps", []) +
+                           ["LLM unavailable; used existing search logic"]
+        }
 
 
 
@@ -145,9 +275,25 @@ def search_services_node(state: AgentState):
 # 4. AGENT PLANNING AND DECISION MAKING
 # ==========================================
 
+
+
 def plan_next_action(state: AgentState):
 
     print("\n[AGENT] Planning next action...")
+
+    # Check whether the input was rejected
+    input_error = state.get("input_error", "")
+
+    if input_error:
+
+        print("[SAFETY] Input validation failed.")
+
+        return {
+            "next_action": "fallback",
+            "agent_steps": state.get("agent_steps", []) + [
+                "Stopped processing invalid input"
+            ]
+        }
 
     results = state.get("search_results", [])
 
@@ -156,30 +302,47 @@ def plan_next_action(state: AgentState):
         print("[AGENT] No relevant service found.")
 
         return {
-            "next_action": "fallback"
+            "next_action": "fallback",
+            "agent_steps": state.get("agent_steps", []) + [
+                "No relevant service found"
+            ]
         }
 
     best_match = results[0]
 
-    confidence = best_match["similarity_score"]
+    print("[AGENT] Best match:", best_match["name"])
 
-    print(f"[AGENT] Best match: {best_match['name']}")
-    print(f"[AGENT] Similarity score: {confidence}")
+    score = best_match.get("similarity_score", 0)
 
-    # Similarity threshold
-    if confidence >= 0.05:
+    print("[AGENT] Similarity score:", round(score, 3))
+
+    # Check retrieval confidence
+    confidence_passed = check_retrieval_confidence(
+        results,
+        threshold=0.25
+    )
+
+    if confidence_passed:
 
         print("[AGENT] Relevant service identified.")
 
         return {
             "selected_service_id": best_match["id"],
-            "next_action": "retrieve"
+            "next_action": "retrieve",
+            "agent_steps": state.get("agent_steps", []) + [
+                "Relevant government service identified",
+                "Retrieval confidence check passed"
+            ]
         }
 
-    print("[AGENT] Confidence too low. Asking for clarification.")
+    print("[SAFETY] Retrieval confidence too low.")
 
     return {
-        "next_action": "fallback"
+        "next_action": "fallback",
+        "agent_steps": state.get("agent_steps", []) + [
+            "Retrieval confidence check failed",
+            "Requested clarification due to low match confidence"
+        ]
     }
 
 
@@ -187,14 +350,22 @@ def plan_next_action(state: AgentState):
 # 5. ROUTE AGENT TO THE NEXT ACTION
 # ==========================================
 
+
+
 def route_agent(state: AgentState):
 
-    action = state.get("next_action")
+    # Stop invalid inputs before retrieval
+    if state.get("input_error"):
+        return "fallback"
 
-    if action == "retrieve":
-        return "retrieve_service"
+    next_action = state.get("next_action", "fallback")
+
+    if next_action == "retrieve":
+        return "retrieve"
 
     return "fallback"
+
+
 
 
 # ==========================================
@@ -237,128 +408,199 @@ def retrieve_service(state: AgentState):
 # ==========================================
 
 
+
+
 def generate_guidance(state: AgentState):
-    print("\n[AGENT] Generating citizen guidance...")
+
+    print("\n[LLM] Generating citizen service guidance...")
 
     service = state.get("service_details", {})
-    original_query = state.get("original_query", "").lower()
+    original_query = state.get("original_query", "")
 
-    response = f"""
-BHUTAN CITIZEN SERVICE GUIDANCE
-================================
+    # ==========================================
+    # 1. RETRIEVE FEEDBACK-BASED ADAPTATION
+    # ==========================================
 
-Service: {service.get('name', 'Unknown')}
-Category: {service.get('category', 'Unknown')}
+    print("\n[ADAPTATION] Analysing citizen feedback...")
 
+    try:
+        adaptation = get_adaptation_guidance()
+
+        adaptation_active = adaptation.get(
+            "adaptation_active", False
+        )
+
+        adaptation_instruction = adaptation.get(
+            "guidance",
+            "Provide clear and accurate guidance."
+        )
+
+        if adaptation_active:
+            print("[ADAPTATION] Feedback-based adaptation is active.")
+            print("[ADAPTATION] Guidance:", adaptation_instruction)
+
+        else:
+            print("[ADAPTATION] Not enough feedback for adaptation.")
+            print("[ADAPTATION] Reason:", adaptation.get("reason"))
+
+    except Exception as error:
+
+        print("[ADAPTATION ERROR]", error)
+
+        adaptation_active = False
+
+        adaptation_instruction = (
+            "Provide clear, simple and accurate guidance."
+        )
+
+    # ==========================================
+    # 2. DEFINE LLM INSTRUCTIONS
+    # ==========================================
+
+    system_prompt = f"""
+You are the response-generation component of the
+Bhutan Citizen Service Guidance Agent.
+
+Your responsibility is to provide helpful and accurate
+government service guidance to citizens.
+
+IMPORTANT ACCURACY AND SAFETY RULES:
+
+1. Use only the supplied government service information.
+2. Never invent documents, fees, eligibility rules,
+   deadlines, procedures or contact information.
+3. If requested information is missing, clearly state
+   that it is not available in the knowledge base.
+4. Answer the citizen's actual question.
+5. Use simple and understandable English.
+6. Organize answers with headings and bullet points.
+7. Include the official source URL when available.
+8. Recommend verifying current requirements with the
+   relevant government authority.
+
+FEEDBACK-BASED ADAPTATION:
+
+The following instructions are generated from previous
+citizen feedback:
+
+{adaptation_instruction}
+
+Apply these instructions to improve the clarity,
+detail and usefulness of your response.
+
+IMPORTANT:
+Feedback-based instructions must never override the
+accuracy and safety rules above.
+Never add unsupported government information merely
+to make an answer more detailed.
 """
 
-    if "document" in original_query:
-        documents = service.get("documents_required", [])
+    # ==========================================
+    # 3. PREPARE CITIZEN QUESTION AND SERVICE DATA
+    # ==========================================
 
-        response += "DOCUMENTS REQUIRED:\n"
+    user_prompt = f"""
+Citizen's question:
 
-        if documents:
-            for index, document in enumerate(documents, 1):
-                response += f"{index}. {document}\n"
-        else:
+{original_query}
+
+Retrieved government service information:
+
+{json.dumps(service, indent=2, ensure_ascii=False)}
+
+Prepare a helpful and accurate response using the
+provided service information and adaptation guidance.
+"""
+
+    # ==========================================
+    # 4. GENERATE RESPONSE
+    # ==========================================
+
+    try:
+
+        response = generate_llm_response(
+            system_prompt,
+            user_prompt
+        )
+
+        if not validate_output(response):
+            raise ValueError("The LLM returned an invalid response.")
+
+        if not response:
+            raise ValueError("The LLM returned an empty response.")
+
+        source_url = service.get("source_url")
+
+        if source_url and source_url not in response:
+
             response += (
-                "The document checklist is not available "
-                "in the knowledge base. Please consult the "
-                "official government source.\n"
+                "\n\nOfficial information source: "
+                + source_url
             )
 
-        response += "\n"
+        response += (
+            "\n\nPlease verify current requirements with "
+            "the relevant government authority before "
+            "taking action."
+        )
 
-    elif "photo" in original_query or "photograph" in original_query:
-        photo_requirements = service.get("photo_requirements", [])
+        print("[LLM] Response generated successfully.")
 
-        response += "PHOTOGRAPH REQUIREMENTS:\n"
+        return {
+            "response": response,
+            "agent_steps": state.get("agent_steps", []) + [
+                "Retrieved previous citizen feedback",
+                "Applied feedback-based response adaptation"
+                if adaptation_active
+                else "Generated response using default instructions",
+                "Generated guidance using LLM reasoning"
+            ]
+        }
 
-        if photo_requirements:
-            for index, requirement in enumerate(photo_requirements, 1):
-                response += f"{index}. {requirement}\n"
-        else:
-            response += "Please consult the official source for photograph requirements.\n"
+    except Exception as error:
 
-        response += "\n"
+        print("[LLM ERROR]", error)
 
-    else:
-        response += f"""
-Description:
-{service.get('description', 'Not available')}
+        source_url = service.get(
+            "source_url",
+            "https://www.citizenservices.gov.bt/"
+        )
 
-Eligibility:
-{service.get('eligibility', 'Please check the official source.')}
-
-Application Procedure:
-"""
-
-        for index, step in enumerate(service.get("procedure", []), 1):
-            response += f"{index}. {step}\n"
-
-        response += "\n"
-
-    if "child" in original_query or "minor" in original_query:
-        child_requirements = service.get("child_requirements", [])
-
-        if child_requirements:
-            response += "ADDITIONAL REQUIREMENTS FOR CHILDREN:\n"
-            for index, requirement in enumerate(child_requirements, 1):
-                response += f"{index}. {requirement}\n"
-            response += "\n"
-
-    response += f"""
-Official Website:
-{service.get('official_website', 'Not available')}
-
-Information Source:
-{service.get('source', 'Not available')}
-
-Source URL:
-{service.get('source_url', 'Not available')}
-
-Please verify the latest requirements with the
-relevant government authority before applying.
-"""
-
-    print("[AGENT] Guidance generated successfully.")
-
-    return {
-        "response": response,
-        "agent_steps": state.get("agent_steps", []) +
-                       ["Generated citizen service guidance"]
-    }
+        return {
+            "response": safe_fallback_response(),
+            "agent_steps": state.get("agent_steps", []) + [
+                "LLM response validation failed; used safe fallback"
+                ]
+        }
 
 
 # ==========================================
 # 8. HANDLE UNKNOWN REQUESTS
 # ==========================================
 
+
 def fallback_response(state: AgentState):
 
     print("\n[AGENT] Executing fallback response...")
 
-    response = """
-I could not confidently identify the government
-service you are looking for.
+    input_error = state.get("input_error", "")
 
-Please provide more details about your request.
+    if input_error:
 
-For example:
-- I want to apply for a passport.
-- I need to register a newborn baby.
-- I want information about death registration.
+        response = input_error
 
-You can also visit the official Bhutan G2C
-Citizen Services Portal:
+        print("[SAFETY] Returning input validation message.")
 
-https://www.citizenservices.gov.bt/
-"""
+    else:
+
+        response = safe_fallback_response()
+
+        print("[AGENT] Asking citizen for clarification.")
 
     return {
         "response": response,
         "agent_steps": state.get("agent_steps", []) + [
-            "Requested clarification because no reliable service match was found"
+            "Returned a safe fallback response"
         ]
     }
 
@@ -366,6 +608,16 @@ https://www.citizenservices.gov.bt/
 # ==========================================
 # 9. BUILD LANGGRAPH WORKFLOW
 # ==========================================
+
+
+
+def route_after_understanding(state: AgentState):
+
+    if state.get("input_error"):
+        return "fallback"
+
+    return "continue"
+
 
 def build_agent():
 
@@ -375,6 +627,11 @@ def build_agent():
     workflow.add_node(
         "understand_request",
         understand_request
+    )
+
+    workflow.add_node(
+        "llm_reasoning",
+        llm_reasoning_node
     )
 
     workflow.add_node(
@@ -398,26 +655,30 @@ def build_agent():
     )
 
     workflow.add_node(
-        "fallback",
+        "fallback_response",
         fallback_response
     )
 
-    # Define workflow connections
+    # Initial connection
     workflow.add_edge(
         START,
         "understand_request"
     )
 
+    # Validate input before LLM reasoning
     workflow.add_conditional_edges(
         "understand_request",
-        lambda state: (
-            "stop" if state.get("next_action") == "stop"
-            else "search"
-        ),
+        route_after_understanding,
         {
-            "stop": END,
-            "search": "search_services"
+            "continue": "llm_reasoning",
+            "fallback": "fallback_response"
         }
+    )
+
+    # LLM and retrieval workflow
+    workflow.add_edge(
+        "llm_reasoning",
+        "search_services"
     )
 
     workflow.add_edge(
@@ -425,26 +686,20 @@ def build_agent():
         "plan_next_action"
     )
 
+    # Decide whether to retrieve or fallback
     workflow.add_conditional_edges(
         "plan_next_action",
         route_agent,
         {
-            "retrieve_service": "retrieve_service",
-            "fallback": "fallback"
+            "retrieve": "retrieve_service",
+            "fallback": "fallback_response"
         }
     )
 
-    workflow.add_conditional_edges(
+    # Generate final guidance
+    workflow.add_edge(
         "retrieve_service",
-        lambda state: (
-            "fallback"
-            if not state.get("service_details")
-            else "guidance"
-        ),
-        {
-            "fallback": "fallback",
-            "guidance": "generate_guidance"
-        }
+        "generate_guidance"
     )
 
     workflow.add_edge(
@@ -453,11 +708,10 @@ def build_agent():
     )
 
     workflow.add_edge(
-        "fallback",
+        "fallback_response",
         END
     )
 
-    # Compile the graph
     return workflow.compile()
 
 
@@ -489,7 +743,8 @@ def run_agent(query: str, session_id="cli-session"):
         "recent_history": recent_history,
         "search_results": [],
         "tools_used": [],
-        "agent_steps": []
+        "agent_steps": [],
+        "input_error": ""
     }
 
     # Execute agent workflow

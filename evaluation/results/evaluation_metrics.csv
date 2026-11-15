@@ -1,0 +1,11 @@
+Metric,Value
+total_test_questions,4.0
+correct_retrievals,4.0
+retrieval_accuracy_percent,100.0
+questions_above_threshold,4.0
+retrieval_coverage_percent,100.0
+total_citizen_feedback,16.0
+average_rating,4.25
+positive_feedback,12.0
+neutral_feedback,1.0
+negative_feedback,3.0
