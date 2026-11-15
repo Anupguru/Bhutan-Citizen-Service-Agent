@@ -90,40 +90,40 @@ If the input is invalid or the system cannot confidently identify a relevant ser
 
 ```text
 Bhutan-Citizen-Service-Agent/
-â”‚
-â”œâ”€â”€ agent/
-â”‚   â”œâ”€â”€ __init__.py
-â”‚   â””â”€â”€ workflow.py
-â”‚
-â”œâ”€â”€ data/
-â”‚   â””â”€â”€ services.json
-â”‚
-â”œâ”€â”€ evaluation/
-â”‚   â”œâ”€â”€ evaluate.py
-â”‚   â””â”€â”€ results/
-â”‚       â”œâ”€â”€ retrieval_results.png
-â”‚       â”œâ”€â”€ feedback_ratings.png
-â”‚       â”œâ”€â”€ retrieval_evaluation.csv
-â”‚       â””â”€â”€ evaluation_metrics.csv
-â”‚
-â”œâ”€â”€ memory/
-â”‚   â””â”€â”€ database.py
-â”‚
-â”œâ”€â”€ safety/
-â”‚   â”œâ”€â”€ __init__.py
-â”‚   â””â”€â”€ guardrails.py
-â”‚
-â”œâ”€â”€ tools/
-â”‚   â”œâ”€â”€ __init__.py
-â”‚   â””â”€â”€ service_tools.py
-â”‚
-â”œâ”€â”€ utils/
-â”‚   â””â”€â”€ llm_client.py
-â”‚
-â”œâ”€â”€ app.py
-â”œâ”€â”€ requirements.txt
-â”œâ”€â”€ README.md
-â””â”€â”€ .gitignore
+Göé
+Gö£GöÇGöÇ agent/
+Göé   Gö£GöÇGöÇ __init__.py
+Göé   GööGöÇGöÇ workflow.py
+Göé
+Gö£GöÇGöÇ data/
+Göé   GööGöÇGöÇ services.json
+Göé
+Gö£GöÇGöÇ evaluation/
+Göé   Gö£GöÇGöÇ evaluate.py
+Göé   GööGöÇGöÇ results/
+Göé       Gö£GöÇGöÇ retrieval_results.png
+Göé       Gö£GöÇGöÇ feedback_ratings.png
+Göé       Gö£GöÇGöÇ retrieval_evaluation.csv
+Göé       GööGöÇGöÇ evaluation_metrics.csv
+Göé
+Gö£GöÇGöÇ memory/
+Göé   GööGöÇGöÇ database.py
+Göé
+Gö£GöÇGöÇ safety/
+Göé   Gö£GöÇGöÇ __init__.py
+Göé   GööGöÇGöÇ guardrails.py
+Göé
+Gö£GöÇGöÇ tools/
+Göé   Gö£GöÇGöÇ __init__.py
+Göé   GööGöÇGöÇ service_tools.py
+Göé
+Gö£GöÇGöÇ utils/
+Göé   GööGöÇGöÇ llm_client.py
+Göé
+Gö£GöÇGöÇ app.py
+Gö£GöÇGöÇ requirements.txt
+Gö£GöÇGöÇ README.md
+GööGöÇGöÇ .gitignore
 ```
 
 ## 8. Installation and Setup
@@ -247,3 +247,4 @@ This agent is an educational project developed for government service informatio
 ## 15. Author
 
 Developed as an individual project for the DAT404 Custom AI Agent assignment.
+
