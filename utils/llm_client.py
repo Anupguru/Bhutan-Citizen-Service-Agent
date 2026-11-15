@@ -8,7 +8,7 @@ from google.genai import types
 OLLAMA_MODEL = "qwen3:1.7b"
 
 # Cloud model configuration
-GEMINI_MODEL = "gemini-3.7-flash"
+GEMINI_MODEL = "gemini-3.6-flash"
 
 
 def get_secret(name):
@@ -67,8 +67,10 @@ def generate_llm_response(system_prompt, user_prompt):
             raise ValueError(
                 "GEMINI_API_KEY is not configured."
             )
-
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=30000)
+            )
 
         response = client.models.generate_content(
             model=GEMINI_MODEL,
